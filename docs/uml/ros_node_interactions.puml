@@ -1,0 +1,81 @@
+@startuml ros_node_interactions
+!theme plain
+title ROS Node Communication and Data Flow
+
+package "ROS Topics" {
+  component "/imu0" as imu_topic
+  component "/cam0/image_raw" as cam0_topic
+  component "/cam1/image_raw" as cam1_topic  
+  component "/gps" as gps_topic
+  component "/odometry" as odom_topic
+  component "/path" as path_topic
+  component "/features" as feat_topic
+}
+
+node "ros_subscribe_msckf" as main_node {
+  component "IMU Subscriber" as imu_sub
+  component "Camera Subscribers" as cam_subs
+  component "GPS Subscriber" as gps_sub
+  component "Message Synchronizer" as sync
+  component "VioManager Instance" as vio_mgr
+  component "RosVisualizer Instance" as viz
+}
+
+package "Publishers" {
+  component "Odometry Publisher" as odom_pub
+  component "Path Publishers" as path_pub
+  component "Feature Publisher" as feat_pub
+  component "Image Publisher" as img_pub
+}
+
+' Input connections
+imu_topic --> imu_sub : sensor_msgs::Imu
+cam0_topic --> cam_subs : sensor_msgs::Image
+cam1_topic --> cam_subs : sensor_msgs::Image
+gps_topic --> gps_sub : sensor_msgs::NavSatFix
+
+' Internal node flow
+imu_sub --> vio_mgr : callback_inertial()
+cam_subs --> sync : ApproximateTime sync
+sync --> vio_mgr : callback_stereo()\ncallback_monocular()
+gps_sub --> vio_mgr : callback_gps()
+
+vio_mgr --> viz : State updates
+viz --> odom_pub : nav_msgs::Odometry
+viz --> path_pub : nav_msgs::Path
+viz --> feat_pub : sensor_msgs::PointCloud
+viz --> img_pub : sensor_msgs::Image
+
+' Output connections
+odom_pub --> odom_topic
+path_pub --> path_topic
+feat_pub --> feat_topic
+img_pub --> "/tracking_image"
+
+note top of sync
+  **Message Synchronization:**
+  - ApproximateTime policy for stereo
+  - Queue size: 5 messages
+  - Handles timestamp alignment
+  - Enables stereo feature tracking
+end note
+
+note right of vio_mgr
+  **VioManager Processing:**
+  1. Queue incoming measurements
+  2. Sort by timestamp
+  3. Process in chronological order
+  4. Maintain temporal consistency
+  5. Handle out-of-order messages
+end note
+
+note bottom of viz
+  **Visualization Outputs:**
+  - Real-time odometry
+  - Trajectory paths (VIO, GPS, combined)
+  - Active feature tracks
+  - System state diagnostics
+  - Performance metrics
+end note
+
+@enduml

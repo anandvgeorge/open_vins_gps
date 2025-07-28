@@ -1,0 +1,74 @@
+@startuml gps_integration_flow
+!theme plain
+title GPS Integration and Coordinate Frame Handling
+
+participant "GPS Sensor" as GPS
+participant "ROS GPS Callback" as ROS
+participant "VioManager" as VIO
+participant "GPS Updater" as GPSUPD
+participant "EKF State" as STATE
+participant "Coordinate Transform" as COORD
+
+== GPS Data Reception ==
+GPS -> ROS : NavSatFix message
+note over ROS : {timestamp, lat, lon, alt,\nposition_covariance}
+
+ROS -> VIO : callback_gps()
+VIO -> VIO : feed_measurement_gps()
+note over VIO : Add to GPS queue\nSort by timestamp
+
+== GPS Processing Trigger ==
+VIO -> VIO : track_gps_and_update()
+note over VIO : Process when GPS timestamp\n< camera timestamp
+
+== Coordinate Transformation ==
+VIO -> GPSUPD : update_state(gps_data, state)
+GPSUPD -> COORD : ConvertLonLatHeiToENU()
+note over COORD : Convert from geodetic\n(lat,lon,height) to local\nEast-North-Up frame
+
+COORD -> COORD : Reference point setup
+note over COORD : Use first GPS measurement\nas local origin\n(lat₀, lon₀, h₀)
+
+COORD -> GPSUPD : ENU coordinates\n[East, North, Up]
+
+== VIO-GPS Frame Alignment ==
+GPSUPD -> GPSUPD : Apply rotation matrix
+note over GPSUPD : Hard-coded rotation to align\nVIO and GPS coordinate frames\nR_gps_to_vio = [-0.703, -0.711, 0;\n                 0.711, -0.703, 0;\n                 0,     0,      1]
+
+== Position Update ==
+GPSUPD -> GPSUPD : Compute residual
+note over GPSUPD : res = GPS_pos_transformed - VIO_pos\nIgnore Z component (2D mode)\nres[2] = 0
+
+GPSUPD -> GPSUPD : Setup measurement model
+note over GPSUPD : H = [0, 0, 0, I₃ₓ₃, 0, ...]\nJacobian w.r.t. position only
+
+GPSUPD -> STATE : EKF Update
+note over STATE : Standard EKF correction:\nK = P·Hᵀ·(H·P·Hᵀ + R)⁻¹\nx = x + K·res\nP = (I - K·H)·P
+
+== State Correction ==
+STATE -> STATE : Update IMU position
+note over STATE : Correct position estimate\nReduce position uncertainty\nMaintain heading estimate
+
+== Path Publishing ==
+GPSUPD -> ROS : Publish GPS path
+GPSUPD -> ROS : Publish VIO path  
+GPSUPD -> ROS : Publish VIO-to-GPS path
+note over ROS : Visualization and\ncomparison purposes
+
+== Error Handling ==
+alt GPS Signal Lost
+    VIO -> VIO : Continue with VIO-only
+    note over VIO : Maintain last known\nGPS-VIO alignment
+end
+
+alt Poor GPS Quality
+    GPSUPD -> GPSUPD : Check covariance
+    note over GPSUPD : Reject updates with\nhigh uncertainty
+end
+
+alt Initial GPS Lock
+    VIO -> GPSUPD : Store reference GPS
+    note over GPSUPD : Set local ENU origin\nInitialize coordinate transform
+end
+
+@enduml

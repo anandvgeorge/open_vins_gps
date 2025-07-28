@@ -1,0 +1,155 @@
+@startuml system_overview
+!theme plain
+title OpenVINS GPS-Enhanced System Architecture
+
+package "ROS Interface" {
+  class ros_subscribe_msckf {
+    +callback_inertial()
+    +callback_monocular()
+    +callback_stereo()
+    +callback_gps()
+    -sync_cam: ApproximateTime
+    -subimu: Subscriber
+    -subgps: Subscriber
+  }
+}
+
+package "Core VIO System" {
+  class VioManager {
+    +feed_measurement_imu()
+    +feed_measurement_camera()
+    +feed_measurement_gps()
+    -track_image_and_update()
+    -track_gps_and_update()
+    -do_feature_propagate_update()
+    -try_to_initialize()
+    -is_initialized_vio: bool
+    -camera_queue: deque<CameraData>
+    -gps_queue: deque<GpsData>
+  }
+  
+  class State {
+    +_imu: IMU
+    +_clones_IMU: map<timestamp, PoseJPL>
+    +_features_SLAM: map<id, Landmark>
+    +_calib_IMUtoCAM: map<id, PoseJPL>
+    +_calib_dt_CAMtoIMU: Vec
+    +_Cov: MatrixXd
+    +margtimestep(): double
+  }
+  
+  class Propagator {
+    +feed_imu(ImuData)
+    +propagate_and_clone()
+    +fast_state_propagate()
+    -predict_mean_rk4()
+    -predict_mean_discrete()
+  }
+}
+
+package "Feature Tracking" {
+  abstract class TrackBase {
+    +feed_new_camera()
+    +get_feature_database()
+    #camera_calib: map<CamBase>
+    #database: FeatureDatabase
+    #num_features: int
+  }
+  
+  class TrackKLT {
+    +feed_new_camera()
+    -perform_detection_monocular()
+    -perform_detection_stereo()
+    -perform_matching()
+  }
+  
+  class TrackAruco {
+    +feed_new_camera()
+    -detect_aruco_tags()
+  }
+  
+  class FeatureDatabase {
+    +update_feature()
+    +get_feature()
+    +cleanup_measurements()
+    +append_new_measurements()
+  }
+  
+  class Feature {
+    +featid: size_t
+    +uvs: map<cam_id, vector<VectorXf>>
+    +timestamps: map<cam_id, vector<double>>
+    +p_FinG: Vector3d
+    +to_delete: bool
+  }
+}
+
+package "EKF Updates" {
+  class UpdaterMSCKF {
+    +update(State, vector<Feature>)
+    -initializer_feat: FeatureInitializer
+    -chi_squared_table: map<int, double>
+  }
+  
+  class UpdaterSLAM {
+    +update(State, vector<Feature>)
+    +delayed_init()
+    +change_anchors()
+  }
+  
+  class UpdaterZeroVelocity {
+    +try_update(State, timestamp)
+    -detect_zero_velocity()
+  }
+}
+
+package "GPS Integration" {
+  class GpsUpdater {
+    +update_state(GpsData, State)
+    +ConvertLonLatHeiToENU()
+    -coordinate_transform()
+  }
+}
+
+package "Initialization" {
+  class InertialInitializer {
+    +feed_imu(ImuData)
+    +try_to_initialize()
+    -_window_length: double
+    -_imu_excite_threshold: double
+  }
+}
+
+package "Visualization" {
+  class RosVisualizer {
+    +visualize()
+    +visualize_odometry()
+    +publish_state()
+    +publish_features()
+  }
+}
+
+' Relationships
+ros_subscribe_msckf --> VioManager : feeds measurements
+VioManager --> State : manages
+VioManager --> Propagator : uses
+VioManager --> TrackBase : uses
+VioManager --> UpdaterMSCKF : uses
+VioManager --> UpdaterSLAM : uses
+VioManager --> UpdaterZeroVelocity : uses
+VioManager --> InertialInitializer : uses
+VioManager --> RosVisualizer : uses
+
+TrackKLT --|> TrackBase
+TrackAruco --|> TrackBase
+TrackBase --> FeatureDatabase : contains
+FeatureDatabase --> Feature : manages
+
+Propagator --> State : propagates
+UpdaterMSCKF --> State : updates
+UpdaterSLAM --> State : updates
+UpdaterZeroVelocity --> State : updates
+
+VioManager --> GpsUpdater : uses for GPS fusion
+
+@enduml

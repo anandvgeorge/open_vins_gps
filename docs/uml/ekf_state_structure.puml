@@ -1,0 +1,128 @@
+@startuml ekf_state_structure
+!theme plain
+title Extended Kalman Filter State Structure
+
+class State {
+  ==IMU State==
+  +_imu: IMU
+  +_timestamp: double
+  ==Clone Window==
+  +_clones_IMU: map<timestamp, PoseJPL>
+  ==SLAM Features==
+  +_features_SLAM: map<featid, Landmark>
+  ==Calibration==
+  +_calib_IMUtoCAM: map<camid, PoseJPL>
+  +_calib_dt_CAMtoIMU: Vec
+  +_cam_intrinsics: map<camid, CamBase>
+  ==Covariance==
+  +_Cov: MatrixXd
+  ==Methods==
+  +margtimestep(): double
+  +max_covariance_size(): size_t
+}
+
+class IMU {
+  ==Pose==
+  +_pose: PoseJPL
+  ==Velocity==
+  +_v: Vec (3D)
+  ==Biases==
+  +_bg: Vec (3D gyro bias)
+  +_ba: Vec (3D accel bias)
+  ==Methods==
+  +quat(): Vector4d
+  +pos(): Vector3d
+  +vel(): Vector3d
+  +bias_g(): Vector3d
+  +bias_a(): Vector3d
+  +Rot(): Matrix3d
+}
+
+class PoseJPL {
+  ==Orientation==
+  +_q: JPLQuat (quaternion)
+  ==Position==
+  +_p: Vec (3D position)
+  ==Methods==
+  +quat(): Vector4d
+  +pos(): Vector3d
+  +Rot(): Matrix3d
+  +size(): int
+}
+
+class Landmark {
+  ==Identity==
+  +_featid: size_t
+  +_feat_representation: enum
+  ==Anchor Info==
+  +_anchor_cam_id: int
+  +_anchor_clone_timestamp: double
+  ==Position==
+  +value(): VectorXd
+  +get_xyz(): Vector3d
+  ==Methods==
+  +update(dx: VectorXd)
+  +size(): int
+}
+
+class Vec {
+  ==State Vector==
+  +_value: VectorXd
+  +_fej: VectorXd (first estimate Jacobian)
+  +_id: int (covariance index)
+  ==Methods==
+  +value(): VectorXd
+  +fej(): VectorXd
+  +size(): int
+  +set_value()
+  +set_fej()
+  +update(dx: VectorXd)
+}
+
+class CamBase {
+  ==Intrinsics==
+  +_value: VectorXd
+  ==Methods==
+  +undistort_point()
+  +distort_point()
+  +get_K(): Matrix3d
+}
+
+' State composition
+State *-- IMU : contains
+State *-- "0..*" PoseJPL : clone window
+State *-- "0..*" Landmark : SLAM features
+State *-- "0..*" PoseJPL : camera calibration
+State *-- "0..*" Vec : time offset
+State *-- "0..*" CamBase : intrinsics
+
+' IMU composition
+IMU *-- PoseJPL : pose
+IMU *-- Vec : velocity
+IMU *-- Vec : gyro bias
+IMU *-- Vec : accel bias
+
+' PoseJPL composition
+PoseJPL *-- Vec : quaternion
+PoseJPL *-- Vec : position
+
+note top of State
+  **State Vector Layout:**
+  [IMU_state, Clone_1, Clone_2, ..., Clone_N,
+   SLAM_feat_1, SLAM_feat_2, ..., SLAM_feat_M,
+   Calib_params, Time_offsets]
+   
+  **Covariance Matrix:**
+  Symmetric positive definite matrix
+  Size: sum of all variable dimensions
+end note
+
+note right of Landmark
+  **Feature Representations:**
+  - GLOBAL_3D: [x, y, z]
+  - ANCHORED_3D: [x, y, z] in anchor frame
+  - ANCHORED_INVERSE_DEPTH: [α, β, ρ]
+  - ANCHORED_MSCKF_INVERSE_DEPTH: [α, β, ρ]
+end note
+
+@enduml

@@ -1,0 +1,75 @@
+@startuml sensor_fusion_flow
+!theme plain
+title Sensor Data Flow and Fusion Pipeline
+
+actor "IMU Sensor\n(200Hz)" as IMU
+actor "Camera Sensor\n(20Hz)" as Camera
+actor "GPS Sensor\n(1-10Hz)" as GPS
+
+participant "ROS Subscribers" as ROS
+participant "VioManager" as VIO
+participant "Propagator" as PROP
+participant "Feature Trackers" as TRACK
+participant "EKF State" as STATE
+participant "MSCKF Updater" as MSCKF
+participant "GPS Updater" as GPSUPD
+participant "SLAM Updater" as SLAM
+
+== Sensor Input ==
+IMU -> ROS : ImuData\n{timestamp, ωm, am}
+Camera -> ROS : CameraData\n{timestamp, images, cam_ids}
+GPS -> ROS : NavSatFix\n{timestamp, lat, lon, cov}
+
+== Data Ingestion ==
+ROS -> VIO : feed_measurement_imu()
+ROS -> VIO : feed_measurement_camera()
+ROS -> VIO : feed_measurement_gps()
+
+note over VIO : Queues measurements\nby timestamp
+
+== IMU Processing ==
+VIO -> PROP : feed_imu(ImuData)
+note over PROP : Store IMU data for\nstate propagation
+
+== Camera Processing ==
+VIO -> TRACK : feed_new_camera()
+note over TRACK : Extract features\nPerform KLT tracking\nMaintain feature database
+
+== State Prediction ==
+VIO -> PROP : propagate_and_clone()
+PROP -> STATE : Update IMU state\nAdd new clone
+note over PROP : Predict state using\nIMU integration\nAdd noise covariance
+
+== Feature Updates ==
+VIO -> TRACK : get_features()
+TRACK -> VIO : return tracked features
+
+alt MSCKF Features Available
+    VIO -> MSCKF : update(state, msckf_features)
+    MSCKF -> STATE : Apply measurement update
+    note over MSCKF : Triangulate features\nNullspace projection\nChi-squared outlier rejection
+end
+
+alt SLAM Features Available  
+    VIO -> SLAM : update(state, slam_features)
+    SLAM -> STATE : Apply measurement update
+    note over SLAM : Update landmark estimates\nManage feature anchors
+end
+
+== GPS Processing ==
+alt GPS Data Available
+    VIO -> GPSUPD : update_state(gps_data, state)
+    note over GPSUPD : Convert LLA to ENU\nCompute position residual
+    GPSUPD -> STATE : Apply GPS position update
+    note over STATE : Update global position\nReduce drift
+end
+
+== State Marginalization ==
+VIO -> STATE : marginalize_old_clone()
+note over STATE : Remove oldest pose clone\nMaintain sliding window
+
+== Output ==
+STATE -> VIO : Updated state estimate
+VIO -> ROS : Publish odometry\nPublish path\nPublish features
+
+@enduml

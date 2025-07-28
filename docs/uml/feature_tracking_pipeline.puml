@@ -1,0 +1,83 @@
+@startuml feature_tracking_pipeline
+!theme plain
+title Feature Tracking and Management Pipeline
+
+participant "Camera Images" as CAM
+participant "TrackKLT/TrackAruco" as TRACK
+participant "FeatureDatabase" as DB
+participant "Feature" as FEAT
+participant "UpdaterMSCKF" as MSCKF
+participant "UpdaterSLAM" as SLAM
+participant "State" as STATE
+
+== Feature Extraction ==
+CAM -> TRACK : New camera frame
+note over TRACK : Apply histogram equalization\nCreate image pyramid
+
+alt KLT Tracking
+    TRACK -> TRACK : detect_features_fast()
+    note over TRACK : Extract FAST corners\nGrid-based distribution\nAvoid existing features
+end
+
+alt ArUco Tracking
+    TRACK -> TRACK : detect_aruco_tags()
+    note over TRACK : Detect ArUco markers\nExtract corner positions
+end
+
+== Feature Tracking ==
+TRACK -> TRACK : perform_temporal_tracking()
+note over TRACK : KLT optical flow tracking\nRansac outlier rejection\nStereo matching (if stereo)
+
+TRACK -> DB : update_feature(id, timestamp, uv)
+DB -> FEAT : Create or update feature
+note over FEAT : Store UV coordinates\nStore timestamps\nMaintain track history
+
+== Feature Classification ==
+TRACK -> DB : get_features()
+
+alt Lost Features (no recent measurements)
+    DB -> MSCKF : Features for immediate update
+    note over MSCKF : Use for MSCKF update\nThen delete
+end
+
+alt Long-term Features (good tracks)
+    DB -> SLAM : Features for SLAM
+    note over SLAM : Initialize as landmarks\nMaintain in state
+end
+
+alt Max-track Features (too long)
+    DB -> MSCKF : Features exceeding max length
+    note over MSCKF : Force update to prevent\ncomputational burden
+end
+
+== Feature Triangulation ==
+MSCKF -> FEAT : triangulate_feature()
+note over FEAT : Compute 3D position\nfrom multiple views\nValidate geometry
+
+alt Triangulation Success
+    MSCKF -> STATE : Apply measurement update
+    note over STATE : Update clone poses\nApply feature constraints
+    FEAT -> FEAT : Mark for deletion
+end
+
+alt Triangulation Failure
+    FEAT -> FEAT : Mark for deletion
+    note over FEAT : Remove poor quality\nfeatures
+end
+
+== SLAM Feature Management ==
+SLAM -> FEAT : Initialize new landmarks
+note over FEAT : Add to state vector\nSet anchor frame
+
+SLAM -> STATE : Update landmark positions
+note over STATE : Maintain long-term\nfeatures in global frame
+
+STATE -> SLAM : Marginalization trigger
+SLAM -> FEAT : Change feature anchors
+note over FEAT : Move anchor to newest\nclone before marginalization
+
+== Feature Database Cleanup ==
+DB -> DB : cleanup_measurements()
+note over DB : Remove old measurements\nDelete marked features\nFree memory
+
+@enduml
