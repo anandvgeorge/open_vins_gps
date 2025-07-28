@@ -43,8 +43,8 @@ VioManager::VioManager(VioManagerOptions &params_) {
   vio_to_gps_pub = nh.advertise<nav_msgs::Path>("vio_to_gps_path", 10);
 
 
-  file_state.open("/home/touchair/orb_ws/src/open_vins/state.txt");
-  file_gps.open("/home/touchair/orb_ws/src/open_vins/gps.txt");
+  file_state.open("/home/anand/openvins_output/state.txt");
+  file_gps.open("/home/anand/openvins_output/gps.txt");
 
 
 
@@ -1001,14 +1001,14 @@ Eigen::Vector3d VioManager::ConvertLonLatHeiToENU(const Eigen::Vector3d &init_lo
   Eigen::Vector3d point_enu;
   static GeographicLib::LocalCartesian local_cartesian;
 
-  static double latitude = 31.3211342333;
-  static double longitude = 120.67211355;
-  static double altitude = 0.0;
+  // static double latitude = 31.3211342333;
+  // static double longitude = 120.67211355;
+  // static double altitude = 0.0;
 
-  local_cartesian.Reset(latitude, longitude, altitude);
+  // local_cartesian.Reset(latitude, longitude, altitude);
 
 
-  // local_cartesian.Reset(init_long_lat_hei(1), init_long_lat_hei(0), init_long_lat_hei(2));
+  local_cartesian.Reset(init_long_lat_hei(1), init_long_lat_hei(0), init_long_lat_hei(2));
   local_cartesian.Forward(point_long_lat_hei(1), point_long_lat_hei(0), point_long_lat_hei(2), point_enu.data()[0], point_enu.data()[1], point_enu.data()[2]);
   return point_enu;
 }
@@ -1026,13 +1026,21 @@ bool VioManager::update_state(const ov_core::GpsData message, std::shared_ptr<St
   Eigen::Matrix3d vio_to_gps_r;
 
 
-  gps_to_vio_r <<  -0.703281,  -0.710912,      0,
-                    0.710912,  -0.703281,      0,
-                    0,          0,             1;       
+  // gps_to_vio_r <<  -0.703281,  -0.710912,      0,
+  //                   0.710912,  -0.703281,      0,
+  //                   0,          0,             1;       
 
-  vio_to_gps_r <<  -0.703281,   0.710912,      0,
-                   -0.710912,  -0.703281,      0,
-                    0,          0,             1;
+  // vio_to_gps_r <<  -0.703281,   0.710912,      0,
+  //                  -0.710912,  -0.703281,      0,
+  //                   0,          0,             1;
+
+  gps_to_vio_r <<  1,  0,  0,
+                   0,  1,  0,
+                   0,  0,  1;
+
+  vio_to_gps_r <<  1,  0,  0,
+                   0,  1,  0,
+                   0,  0,  1;
 
   
   gps_path.header.frame_id = "global";
@@ -1128,7 +1136,7 @@ bool VioManager::update_state(const ov_core::GpsData message, std::shared_ptr<St
 
   // res = G_p_i - exp_VIO_p_Gps;
   res = exp_VIO_p_Gps - G_p_i;
-  res[2] = 0;
+  // res[2] = 0;
 
   // std::cout << res.transpose() << std::endl;
 

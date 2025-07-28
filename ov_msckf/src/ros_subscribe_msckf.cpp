@@ -232,7 +232,7 @@ void callback_gps(const sensor_msgs::NavSatFix::ConstPtr &msg)
 
   ov_core::GpsData message;
   message.timestamp = msg->header.stamp.toSec();
-  message.lla << msg->longitude, msg->latitude, 0;
+  message.lla << msg->longitude, msg->latitude, msg->altitude;
   message.cov << msg->position_covariance[0], msg->position_covariance[1], msg->position_covariance[2],
                  msg->position_covariance[3], msg->position_covariance[4], msg->position_covariance[5],
                  msg->position_covariance[6], msg->position_covariance[7], msg->position_covariance[8];

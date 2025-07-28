@@ -199,7 +199,7 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const Eigen::MatrixXd 
 
   
 
-  std::cout << delta_x.block(state->_imu->id(), 0, state->_imu->size(), 1).transpose() << std::endl;
+  // std::cout << delta_x.block(state->_imu->id(), 0, state->_imu->size(), 1).transpose() << std::endl;
 
   const Eigen::MatrixXd I_KH = Eigen::MatrixXd::Identity(state->_Cov.rows(), state->_Cov.rows()) - K * H;
   state->_Cov = I_KH * P_minus * I_KH.transpose() + K * R * K.transpose();
