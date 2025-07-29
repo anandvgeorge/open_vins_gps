@@ -42,6 +42,9 @@ VioManager::VioManager(VioManagerOptions &params_) {
 
   vio_to_gps_pub = nh.advertise<nav_msgs::Path>("vio_to_gps_path", 10);
 
+  odom_vio_cam_rate_pub = nh.advertise<nav_msgs::Odometry>("odom_vio/cam_rate", 10);
+  odom_vio_imu_rate_pub = nh.advertise<nav_msgs::Odometry>("odom_vio/imu_rate", 10);
+
 
   file_state.open("/home/anand/openvins_output/state.txt");
   file_gps.open("/home/anand/openvins_output/gps.txt");
@@ -218,6 +221,9 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
     track_gps_and_update(gps_queue.at(0));
     gps_queue.pop_front();
   }
+
+  // Publish odometry at IMU frequency (after all processing)
+  publish_odometry(message.timestamp, odom_vio_imu_rate_pub);
 
   // std::cout << gps_queue.size() << std::endl;
 
@@ -436,6 +442,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
     propagator->propagate_and_clone(state, message.timestamp);
   }
   rT3 = boost::posix_time::microsec_clock::local_time();
+
+  // Publish odometry after propagation (at camera rate when propagation occurs)
+  publish_odometry(message.timestamp, odom_vio_cam_rate_pub);
 
   // If we have not reached max clones, we should just return...
   // This isn't super ideal, but it keeps the logic after this easier...
@@ -1090,13 +1099,13 @@ bool VioManager::update_state(const ov_core::GpsData message, std::shared_ptr<St
     vio_to_gps_pose.header = vio_to_gps_path.header;
 
 
-    vio_to_gps_pose.pose.position.x = exp_VIO_p_Gps[0];
-    vio_to_gps_pose.pose.position.y = exp_VIO_p_Gps[1];
-    vio_to_gps_pose.pose.position.z = exp_VIO_p_Gps[2];
+    // vio_to_gps_pose.pose.position.x = exp_VIO_p_Gps[0];
+    // vio_to_gps_pose.pose.position.y = exp_VIO_p_Gps[1];
+    // vio_to_gps_pose.pose.position.z = exp_VIO_p_Gps[2];
 
-    // vio_to_gps_pose.pose.position.x = exp_G_p_Gps[0];
-    // vio_to_gps_pose.pose.position.y = exp_G_p_Gps[1];
-    // vio_to_gps_pose.pose.position.z = exp_G_p_Gps[2];
+    vio_to_gps_pose.pose.position.x = exp_G_p_Gps[0];
+    vio_to_gps_pose.pose.position.y = exp_G_p_Gps[1];
+    vio_to_gps_pose.pose.position.z = exp_G_p_Gps[2];
 
 
     vio_to_gps_pose.pose.orientation.x = 0;
@@ -1167,4 +1176,93 @@ bool VioManager::update_state(const ov_core::GpsData message, std::shared_ptr<St
 
   
   return true;
+}
+
+void VioManager::publish_odometry(double timestamp, ros::Publisher& publisher) {
+  // Only publish if VIO is initialized
+  if (!is_initialized_vio)
+    return;
+
+  // Create odometry message
+  nav_msgs::Odometry odom_msg;
+  
+  // Set header
+  odom_msg.header.stamp = ros::Time(timestamp);
+  odom_msg.header.frame_id = "global";  // or "odom" depending on your coordinate frame
+  odom_msg.child_frame_id = "base_link";  // or "imu_link" depending on your setup
+
+  // Get current IMU state
+  Eigen::Vector3d pos = state->_imu->pos();
+  Eigen::Vector4d quat = state->_imu->quat();  // JPL quaternion [qx, qy, qz, qw]
+  Eigen::Vector3d vel = state->_imu->vel();
+  Eigen::Vector3d gyro_bias = state->_imu->bias_g();
+
+  // Set position (IMU position in global frame)
+  odom_msg.pose.pose.position.x = pos(0);
+  odom_msg.pose.pose.position.y = pos(1);
+  odom_msg.pose.pose.position.z = pos(2);
+
+  // Set orientation (convert JPL to Hamilton quaternion for ROS)
+  // JPL: [qx, qy, qz, qw] -> Hamilton: [qx, qy, qz, qw] (same order but different convention)
+  odom_msg.pose.pose.orientation.x = quat(0);
+  odom_msg.pose.pose.orientation.y = quat(1);
+  odom_msg.pose.pose.orientation.z = quat(2);
+  odom_msg.pose.pose.orientation.w = quat(3);
+
+  // Set linear velocity (in global frame)
+  odom_msg.twist.twist.linear.x = vel(0);
+  odom_msg.twist.twist.linear.y = vel(1);
+  odom_msg.twist.twist.linear.z = vel(2);
+
+  // Angular velocity: Get the latest IMU measurement if available
+  // For now, set to zero - could be improved by accessing latest gyro measurement
+  odom_msg.twist.twist.angular.x = 0.0;
+  odom_msg.twist.twist.angular.y = 0.0;
+  odom_msg.twist.twist.angular.z = 0.0;
+
+  // Set covariance matrices from state covariance if available
+  // Initialize to zero
+  for (int i = 0; i < 36; i++) {
+    odom_msg.pose.covariance[i] = 0.0;
+    odom_msg.twist.covariance[i] = 0.0;
+  }
+  
+  // Extract covariance from state if available
+  Eigen::MatrixXd full_cov = StateHelper::get_full_covariance(state);
+  if (full_cov.rows() >= 15 && full_cov.cols() >= 15) {
+    // Position covariance (extract 3x3 block for position)
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        odom_msg.pose.covariance[i * 6 + j] = full_cov(4 + i, 4 + j);  // Position starts at index 4 in state
+      }
+    }
+    
+    // Orientation covariance (extract 3x3 block for orientation)
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        odom_msg.pose.covariance[(3 + i) * 6 + (3 + j)] = full_cov(0 + i, 0 + j);  // Orientation starts at index 0
+      }
+    }
+    
+    // Velocity covariance (extract 3x3 block for velocity)
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        odom_msg.twist.covariance[i * 6 + j] = full_cov(7 + i, 7 + j);  // Velocity starts at index 7
+      }
+    }
+  } else {
+    // Fallback to reasonable default values
+    odom_msg.pose.covariance[0] = 0.1;   // x
+    odom_msg.pose.covariance[7] = 0.1;   // y  
+    odom_msg.pose.covariance[14] = 0.1;  // z
+    odom_msg.pose.covariance[21] = 0.1;  // roll
+    odom_msg.pose.covariance[28] = 0.1;  // pitch
+    odom_msg.pose.covariance[35] = 0.1;  // yaw
+    odom_msg.twist.covariance[0] = 0.1;  // vx
+    odom_msg.twist.covariance[7] = 0.1;  // vy
+    odom_msg.twist.covariance[14] = 0.1; // vz
+  }
+
+  // Publish the odometry message using the provided publisher
+  publisher.publish(odom_msg);
 }

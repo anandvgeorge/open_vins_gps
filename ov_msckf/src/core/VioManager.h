@@ -52,6 +52,7 @@
 
 #include "VioManagerOptions.h"
 #include <nav_msgs/Path.h>
+#include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseStamped.h>
 
 namespace ov_msckf {
@@ -249,6 +250,8 @@ public:
   ros::Publisher gps_path_pub;
   ros::Publisher vio_path_pub;
   ros::Publisher vio_to_gps_pub;
+  ros::Publisher odom_vio_cam_rate_pub;
+  ros::Publisher odom_vio_imu_rate_pub;
 
   std::ofstream file_state;
   std::ofstream file_gps;
@@ -268,6 +271,13 @@ protected:
 
 
   bool update_state(const ov_core::GpsData message, std::shared_ptr<State> state);
+
+  /**
+   * @brief Publish VIO odometry message
+   * @param timestamp Current timestamp
+   * @param publisher ROS publisher to use for publishing
+   */
+  void publish_odometry(double timestamp, ros::Publisher& publisher);
 
   /**
    * @brief This will do the propagation and feature updates to the state
