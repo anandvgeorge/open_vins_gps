@@ -650,7 +650,11 @@ void RosVisualizer::publish_groundtruth() {
   Eigen::Matrix<double, 6, 6> covariance = StateHelper::get_marginal_covariance(_app->get_state(), statevars);
 
   // Calculate NEES values
-  double ori_nees = 2 * quat_diff.block(0, 0, 3, 1).dot(covariance.block(0, 0, 3, 3).inverse() * 2 * quat_diff.block(0, 0, 3, 1));
+  // double ori_nees = 2 * quat_diff.block(0, 0, 3, 1).dot(covariance.block(0, 0, 3, 3).inverse() * 2 * quat_diff.block(0, 0, 3, 1));
+  // NOTE: we use the LDLT decomposition to solve the system, which is more efficient than the inverse
+  const Eigen::Vector3d q = quat_diff.head<3>();     // vector at compile time
+  const Eigen::Matrix3d S = covariance.block<3,3>(0, 0);
+  double ori_nees = 4.0 * q.dot( S.ldlt().solve(q) ); // or .llt() if SPD is guaranteed
   Eigen::Vector3d errpos = state_ekf.block(4, 0, 3, 1) - state_gt.block(5, 0, 3, 1);
   double pos_nees = errpos.transpose() * covariance.block(3, 3, 3, 3).inverse() * errpos;
 
